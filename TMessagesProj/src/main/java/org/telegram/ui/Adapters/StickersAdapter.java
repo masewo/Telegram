@@ -3,14 +3,13 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.ui.Adapters;
 
 import android.content.Context;
 import android.text.TextUtils;
-import android.view.View;
 import android.view.ViewGroup;
 
 import org.telegram.messenger.NotificationCenter;
@@ -19,6 +18,7 @@ import org.telegram.messenger.support.widget.RecyclerView;
 import org.telegram.messenger.FileLoader;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.Cells.StickerCell;
+import org.telegram.ui.Components.RecyclerListView;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -26,7 +26,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 
-public class StickersAdapter extends RecyclerView.Adapter implements NotificationCenter.NotificationCenterDelegate {
+public class StickersAdapter extends RecyclerListView.SelectionAdapter implements NotificationCenter.NotificationCenterDelegate {
 
     private Context mContext;
     private ArrayList<TLRPC.Document> stickers;
@@ -37,13 +37,6 @@ public class StickersAdapter extends RecyclerView.Adapter implements Notificatio
 
     public interface StickersAdapterDelegate {
         void needChangePanelVisibility(boolean show);
-    }
-
-    private class Holder extends RecyclerView.ViewHolder {
-
-        public Holder(View itemView) {
-            super(itemView);
-        }
     }
 
     public StickersAdapter(Context context, StickersAdapterDelegate delegate) {
@@ -84,7 +77,7 @@ public class StickersAdapter extends RecyclerView.Adapter implements Notificatio
             File f = FileLoader.getPathToAttach(document.thumb, "webp", true);
             if (!f.exists()) {
                 stickersToLoad.add(FileLoader.getAttachFileName(document.thumb, "webp"));
-                FileLoader.getInstance().loadFile(document.thumb.location, "webp", 0, true);
+                FileLoader.getInstance().loadFile(document.thumb.location, "webp", 0, 1);
             }
         }
         return stickersToLoad.isEmpty();
@@ -118,9 +111,15 @@ public class StickersAdapter extends RecyclerView.Adapter implements Notificatio
                     stickers = newStickers != null && !newStickers.isEmpty() ? new ArrayList<>(newStickers) : null;
                     if (stickers != null) {
                         final ArrayList<TLRPC.Document> recentStickers = StickersQuery.getRecentStickersNoCopy(StickersQuery.TYPE_IMAGE);
+                        final ArrayList<TLRPC.Document> favsStickers = StickersQuery.getRecentStickersNoCopy(StickersQuery.TYPE_FAVE);
                         if (!recentStickers.isEmpty()) {
                             Collections.sort(stickers, new Comparator<TLRPC.Document>() {
                                 private int getIndex(long id) {
+                                    for (int a = 0; a < favsStickers.size(); a++) {
+                                        if (favsStickers.get(a).id == id) {
+                                            return a + 1000;
+                                        }
+                                    }
                                     for (int a = 0; a < recentStickers.size(); a++) {
                                         if (recentStickers.get(a).id == id) {
                                             return a;
@@ -175,14 +174,14 @@ public class StickersAdapter extends RecyclerView.Adapter implements Notificatio
     }
 
     @Override
-    public long getItemId(int i) {
-        return i;
+    public boolean isEnabled(RecyclerView.ViewHolder holder) {
+        return true;
     }
 
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup viewGroup, int i) {
         StickerCell view = new StickerCell(mContext);
-        return new Holder(view);
+        return new RecyclerListView.Holder(view);
     }
 
     @Override

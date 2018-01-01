@@ -3,7 +3,7 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.ui.Components;
@@ -147,7 +147,7 @@ public class SeekBarWaveform {
         float barCounter = 0;
         int nextBarNum = 0;
 
-        paintInner.setColor(messageObject != null && !messageObject.isOutOwner() && messageObject.isContentUnread() && messageObject.messageOwner.to_id.channel_id == 0 ? outerColor : (selected ? selectedColor : innerColor));
+        paintInner.setColor(messageObject != null && !messageObject.isOutOwner() && messageObject.isContentUnread() ? outerColor : (selected ? selectedColor : innerColor));
         paintOuter.setColor(outerColor);
 
         int y = (height - AndroidUtilities.dp(14)) / 2;

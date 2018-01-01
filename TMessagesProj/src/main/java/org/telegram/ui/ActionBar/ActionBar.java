@@ -3,18 +3,22 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.ui.ActionBar;
 
 import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -22,7 +26,6 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.AnimatorListenerAdapterProxy;
 import org.telegram.ui.Components.LayoutHelper;
 
 import java.util.ArrayList;
@@ -52,18 +55,33 @@ public class ActionBar extends FrameLayout {
     private int extraHeight;
     private AnimatorSet actionModeAnimation;
 
+    private int titleRightMargin;
+
     private boolean allowOverlayTitle;
     private CharSequence lastTitle;
+    private CharSequence lastSubtitle;
+    private Runnable titleActionRunnable;
     private boolean castShadows = true;
 
     protected boolean isSearchFieldVisible;
     protected int itemsBackgroundColor;
+    protected int itemsActionModeBackgroundColor;
+    protected int itemsColor;
+    protected int itemsActionModeColor;
     private boolean isBackOverlayVisible;
     protected BaseFragment parentFragment;
     public ActionBarMenuOnItemClick actionBarMenuOnItemClick;
 
     public ActionBar(Context context) {
         super(context);
+        setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (titleActionRunnable != null) {
+                    titleActionRunnable.run();
+                }
+            }
+        });
     }
 
     private void createBackButtonImage() {
@@ -72,14 +90,17 @@ public class ActionBar extends FrameLayout {
         }
         backButtonImageView = new ImageView(getContext());
         backButtonImageView.setScaleType(ImageView.ScaleType.CENTER);
-        backButtonImageView.setBackgroundDrawable(Theme.createBarSelectorDrawable(itemsBackgroundColor));
+        backButtonImageView.setBackgroundDrawable(Theme.createSelectorDrawable(itemsBackgroundColor));
+        if (itemsColor != 0) {
+            backButtonImageView.setColorFilter(new PorterDuffColorFilter(itemsColor, PorterDuff.Mode.MULTIPLY));
+        }
         backButtonImageView.setPadding(AndroidUtilities.dp(1), 0, 0, 0);
         addView(backButtonImageView, LayoutHelper.createFrame(54, 54, Gravity.LEFT | Gravity.TOP));
 
         backButtonImageView.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (isSearchFieldVisible) {
+                if (!actionModeVisible && isSearchFieldVisible) {
                     closeSearchField();
                     return;
                 }
@@ -97,7 +118,10 @@ public class ActionBar extends FrameLayout {
         backButtonImageView.setVisibility(drawable == null ? GONE : VISIBLE);
         backButtonImageView.setImageDrawable(drawable);
         if (drawable instanceof BackDrawable) {
-            ((BackDrawable) drawable).setRotation(isActionModeShowed() ? 1 : 0, false);
+            BackDrawable backDrawable = (BackDrawable) drawable;
+            backDrawable.setRotation(isActionModeShowed() ? 1 : 0, false);
+            backDrawable.setRotatedColor(itemsActionModeColor);
+            backDrawable.setColor(itemsColor);
         }
     }
 
@@ -115,7 +139,8 @@ public class ActionBar extends FrameLayout {
         }
         subtitleTextView = new SimpleTextView(getContext());
         subtitleTextView.setGravity(Gravity.LEFT);
-        subtitleTextView.setTextColor(Theme.ACTION_BAR_SUBTITLE_COLOR);
+        subtitleTextView.setVisibility(GONE);
+        subtitleTextView.setTextColor(Theme.getColor(Theme.key_actionBarDefaultSubtitle));
         addView(subtitleTextView, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
     }
 
@@ -132,7 +157,8 @@ public class ActionBar extends FrameLayout {
             createSubtitleTextView();
         }
         if (subtitleTextView != null) {
-            subtitleTextView.setVisibility(value != null && !isSearchFieldVisible ? VISIBLE : GONE);
+            lastSubtitle = value;
+            subtitleTextView.setVisibility(!TextUtils.isEmpty(value) && !isSearchFieldVisible ? VISIBLE : GONE);
             subtitleTextView.setText(value);
         }
     }
@@ -143,9 +169,13 @@ public class ActionBar extends FrameLayout {
         }
         titleTextView = new SimpleTextView(getContext());
         titleTextView.setGravity(Gravity.LEFT);
-        titleTextView.setTextColor(0xffffffff);
+        titleTextView.setTextColor(Theme.getColor(Theme.key_actionBarDefaultTitle));
         titleTextView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
         addView(titleTextView, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
+    }
+
+    public void setTitleRightMargin(int value) {
+        titleRightMargin = value;
     }
 
     public void setTitle(CharSequence value) {
@@ -159,11 +189,30 @@ public class ActionBar extends FrameLayout {
         }
     }
 
+    public void setTitleColor(int color) {
+        if (titleTextView == null) {
+            createTitleTextView();
+        }
+        titleTextView.setTextColor(color);
+    }
+
     public void setSubtitleColor(int color) {
         if (subtitleTextView == null) {
             createSubtitleTextView();
         }
         subtitleTextView.setTextColor(color);
+    }
+
+    public void setPopupItemsColor(int color) {
+        if (menu != null) {
+            menu.setPopupItemsColor(color);
+        }
+    }
+
+    public void setPopupBackgroundColor(int color) {
+        if (menu != null) {
+            menu.redrawPopup(color);
+        }
     }
 
     public SimpleTextView getSubtitleTextView() {
@@ -201,12 +250,21 @@ public class ActionBar extends FrameLayout {
         actionBarMenuOnItemClick = listener;
     }
 
+    public ActionBarMenuOnItemClick getActionBarMenuOnItemClick() {
+        return actionBarMenuOnItemClick;
+    }
+
+    public View getBackButton() {
+        return backButtonImageView;
+    }
+
     public ActionBarMenu createActionMode() {
         if (actionMode != null) {
             return actionMode;
         }
         actionMode = new ActionBarMenu(getContext(), this);
-        actionMode.setBackgroundColor(0xffffffff);
+        actionMode.isActionMode = true;
+        actionMode.setBackgroundColor(Theme.getColor(Theme.key_actionBarActionModeDefault));
         addView(actionMode, indexOfChild(backButtonImageView));
         actionMode.setPadding(0, occupyStatusBar ? AndroidUtilities.statusBarHeight : 0, 0, 0);
         FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams)actionMode.getLayoutParams();
@@ -218,7 +276,7 @@ public class ActionBar extends FrameLayout {
 
         if (occupyStatusBar && actionModeTop == null) {
             actionModeTop = new View(getContext());
-            actionModeTop.setBackgroundColor(0x99000000);
+            actionModeTop.setBackgroundColor(Theme.getColor(Theme.key_actionBarActionModeDefaultTop));
             addView(actionModeTop);
             layoutParams = (FrameLayout.LayoutParams)actionModeTop.getLayoutParams();
             layoutParams.height = AndroidUtilities.statusBarHeight;
@@ -247,7 +305,7 @@ public class ActionBar extends FrameLayout {
         actionModeAnimation = new AnimatorSet();
         actionModeAnimation.playTogether(animators);
         actionModeAnimation.setDuration(200);
-        actionModeAnimation.addListener(new AnimatorListenerAdapterProxy() {
+        actionModeAnimation.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationStart(Animator animation) {
                 actionMode.setVisibility(VISIBLE);
@@ -285,7 +343,7 @@ public class ActionBar extends FrameLayout {
             if (drawable instanceof BackDrawable) {
                 ((BackDrawable) drawable).setRotation(1, true);
             }
-            backButtonImageView.setBackgroundDrawable(Theme.createBarSelectorDrawable(Theme.ACTION_BAR_MODE_SELECTOR_COLOR));
+            backButtonImageView.setBackgroundDrawable(Theme.createSelectorDrawable(itemsActionModeBackgroundColor));
         }
     }
 
@@ -305,7 +363,7 @@ public class ActionBar extends FrameLayout {
         actionModeAnimation = new AnimatorSet();
         actionModeAnimation.playTogether(animators);
         actionModeAnimation.setDuration(200);
-        actionModeAnimation.addListener(new AnimatorListenerAdapterProxy() {
+        actionModeAnimation.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
                 if (actionModeAnimation != null && actionModeAnimation.equals(animation)) {
@@ -339,20 +397,38 @@ public class ActionBar extends FrameLayout {
             if (drawable instanceof BackDrawable) {
                 ((BackDrawable) drawable).setRotation(0, true);
             }
-            backButtonImageView.setBackgroundDrawable(Theme.createBarSelectorDrawable(itemsBackgroundColor));
+            backButtonImageView.setBackgroundDrawable(Theme.createSelectorDrawable(itemsBackgroundColor));
         }
     }
 
     public void showActionModeTop() {
         if (occupyStatusBar && actionModeTop == null) {
             actionModeTop = new View(getContext());
-            actionModeTop.setBackgroundColor(0x99000000);
+            actionModeTop.setBackgroundColor(Theme.getColor(Theme.key_actionBarActionModeDefaultTop));
             addView(actionModeTop);
             FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) actionModeTop.getLayoutParams();
             layoutParams.height = AndroidUtilities.statusBarHeight;
             layoutParams.width = LayoutHelper.MATCH_PARENT;
             layoutParams.gravity = Gravity.TOP | Gravity.LEFT;
             actionModeTop.setLayoutParams(layoutParams);
+        }
+    }
+
+    public void setActionModeTopColor(int color) {
+        if (actionModeTop != null) {
+            actionModeTop.setBackgroundColor(color);
+        }
+    }
+
+    public void setSearchTextColor(int color, boolean placeholder) {
+        if (menu != null) {
+            menu.setSearchTextColor(color, placeholder);
+        }
+    }
+
+    public void setActionModeColor(int color) {
+        if (actionMode != null) {
+            actionMode.setBackgroundColor(color);
         }
     }
 
@@ -383,10 +459,14 @@ public class ActionBar extends FrameLayout {
     }
 
     public void closeSearchField() {
+        closeSearchField(true);
+    }
+
+    public void closeSearchField(boolean closeKeyboard) {
         if (!isSearchFieldVisible || menu == null) {
             return;
         }
-        menu.closeSearchField();
+        menu.closeSearchField(closeKeyboard);
     }
 
     public void openSearchField(String text) {
@@ -424,12 +504,11 @@ public class ActionBar extends FrameLayout {
         }
 
         if (titleTextView != null && titleTextView.getVisibility() != GONE || subtitleTextView != null && subtitleTextView.getVisibility() != GONE) {
-            int availableWidth = width - (menu != null ? menu.getMeasuredWidth() : 0) - AndroidUtilities.dp(16) - textLeft;
+            int availableWidth = width - (menu != null ? menu.getMeasuredWidth() : 0) - AndroidUtilities.dp(16) - textLeft - titleRightMargin;
 
             if (titleTextView != null && titleTextView.getVisibility() != GONE) {
                 titleTextView.setTextSize(!AndroidUtilities.isTablet() && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 18 : 20);
                 titleTextView.measure(MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(24), MeasureSpec.AT_MOST));
-
             }
             if (subtitleTextView != null && subtitleTextView.getVisibility() != GONE) {
                 subtitleTextView.setTextSize(!AndroidUtilities.isTablet() && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 14 : 16);
@@ -545,11 +624,11 @@ public class ActionBar extends FrameLayout {
         allowOverlayTitle = value;
     }
 
-    public void setTitleOverlayText(String text) {
+    public void setTitleOverlayText(String title, String subtitle, Runnable action) {
         if (!allowOverlayTitle || parentFragment.parentLayout == null) {
             return;
         }
-        CharSequence textToSet = text != null ? text : lastTitle;
+        CharSequence textToSet = title != null ? title : lastTitle;
         if (textToSet != null && titleTextView == null) {
             createTitleTextView();
         }
@@ -557,6 +636,15 @@ public class ActionBar extends FrameLayout {
             titleTextView.setVisibility(textToSet != null && !isSearchFieldVisible ? VISIBLE : INVISIBLE);
             titleTextView.setText(textToSet);
         }
+        textToSet = subtitle != null ? subtitle : lastSubtitle;
+        if (textToSet != null && subtitleTextView == null) {
+            createSubtitleTextView();
+        }
+        if (subtitleTextView != null) {
+            subtitleTextView.setVisibility(!TextUtils.isEmpty(textToSet) && !isSearchFieldVisible ? VISIBLE : GONE);
+            subtitleTextView.setText(textToSet);
+        }
+        titleActionRunnable = action;
     }
 
     public boolean isSearchFieldVisible() {
@@ -574,10 +662,54 @@ public class ActionBar extends FrameLayout {
         return occupyStatusBar;
     }
 
-    public void setItemsBackgroundColor(int color) {
-        itemsBackgroundColor = color;
-        if (backButtonImageView != null) {
-            backButtonImageView.setBackgroundDrawable(Theme.createBarSelectorDrawable(itemsBackgroundColor));
+    public void setItemsBackgroundColor(int color, boolean isActionMode) {
+        if (isActionMode) {
+            itemsActionModeBackgroundColor = color;
+            if (actionModeVisible) {
+                if (backButtonImageView != null) {
+                    backButtonImageView.setBackgroundDrawable(Theme.createSelectorDrawable(itemsActionModeBackgroundColor));
+                }
+            }
+            if (actionMode != null) {
+                actionMode.updateItemsBackgroundColor();
+            }
+        } else {
+            itemsBackgroundColor = color;
+            if (backButtonImageView != null) {
+                backButtonImageView.setBackgroundDrawable(Theme.createSelectorDrawable(itemsBackgroundColor));
+            }
+            if (menu != null) {
+                menu.updateItemsBackgroundColor();
+            }
+        }
+    }
+
+    public void setItemsColor(int color, boolean isActionMode) {
+        if (isActionMode) {
+            itemsActionModeColor = color;
+            if (actionMode != null) {
+                actionMode.updateItemsColor();
+            }
+            if (backButtonImageView != null) {
+                Drawable drawable = backButtonImageView.getDrawable();
+                if (drawable instanceof BackDrawable) {
+                    ((BackDrawable) drawable).setRotatedColor(color);
+                }
+            }
+        } else {
+            itemsColor = color;
+            if (backButtonImageView != null) {
+                if (itemsColor != 0) {
+                    backButtonImageView.setColorFilter(new PorterDuffColorFilter(itemsColor, PorterDuff.Mode.MULTIPLY));
+                    Drawable drawable = backButtonImageView.getDrawable();
+                    if (drawable instanceof BackDrawable) {
+                        ((BackDrawable) drawable).setColor(color);
+                    }
+                }
+            }
+            if (menu != null) {
+                menu.updateItemsColor();
+            }
         }
     }
 

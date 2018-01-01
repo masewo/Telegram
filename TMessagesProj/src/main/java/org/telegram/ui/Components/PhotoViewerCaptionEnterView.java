@@ -3,7 +3,7 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.ui.Components;
@@ -14,6 +14,7 @@ import android.content.Context;
 import android.os.Build;
 import android.text.Editable;
 import android.text.InputFilter;
+import android.text.SpannableStringBuilder;
 import android.text.TextWatcher;
 import android.text.style.ImageSpan;
 import android.util.TypedValue;
@@ -22,9 +23,9 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -37,6 +38,7 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.Theme;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -49,7 +51,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
         void onWindowSizeChanged(int size);
     }
 
-    private EditText messageEditText;
+    private EditTextBoldCursor messageEditText;
     private ImageView emojiButton;
     private EmojiView emojiView;
     private SizeNotifierFrameLayoutPhoto sizeNotifierLayout;
@@ -69,6 +71,8 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
     private int keyboardHeightLand;
     private boolean keyboardVisible;
     private int emojiPadding;
+
+    private boolean forceFloatingEmoji;
 
     private boolean innerTextChange;
 
@@ -110,14 +114,14 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
             }
         });
 
-        messageEditText = new EditText(context) {
+        messageEditText = new EditTextBoldCursor(context) {
             @Override
             protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                 try {
                     super.onMeasure(widthMeasureSpec, heightMeasureSpec);
                 } catch (Exception e) {
                     setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), AndroidUtilities.dp(51));
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
             }
         };
@@ -187,7 +191,8 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
         messageEditText.setGravity(Gravity.BOTTOM);
         messageEditText.setPadding(0, AndroidUtilities.dp(11), 0, AndroidUtilities.dp(12));
         messageEditText.setBackgroundDrawable(null);
-        AndroidUtilities.clearCursorDrawable(messageEditText);
+        messageEditText.setCursorColor(0xffffffff);
+        messageEditText.setCursorSize(AndroidUtilities.dp(20));
         messageEditText.setTextColor(0xffffffff);
         messageEditText.setHintTextColor(0xb2ffffff);
         InputFilter[] inputFilters = new InputFilter[1];
@@ -256,6 +261,24 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
                 }
             }
         });
+
+        ImageView doneButton = new ImageView(context);
+        doneButton.setScaleType(ImageView.ScaleType.CENTER);
+        doneButton.setImageResource(R.drawable.ic_done);
+        textFieldContainer.addView(doneButton, LayoutHelper.createLinear(48, 48, Gravity.BOTTOM));
+        if (Build.VERSION.SDK_INT >= 21) {
+            doneButton.setBackgroundDrawable(Theme.createSelectorDrawable(Theme.ACTION_BAR_WHITE_SELECTOR_COLOR));
+        }
+        doneButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                delegate.onCaptionEnter();
+            }
+        });
+    }
+
+    public void setForceFloatingEmoji(boolean value) {
+        forceFloatingEmoji = value;
     }
 
     public boolean hideActionMode() {
@@ -263,7 +286,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
             try {
                 currentActionMode.finish();
             } catch (Exception e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
             currentActionMode = null;
             return true;
@@ -299,7 +322,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
                 method.invoke(mode);
             }
         } catch (Throwable e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
     }
 
@@ -352,10 +375,105 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
         return messageEditText.getSelectionStart();
     }
 
-    public void replaceWithText(int start, int len, String text) {
+    private void createEmojiView() {
+        if (emojiView != null) {
+            return;
+        }
+        emojiView = new EmojiView(false, false, getContext(), null);
+        emojiView.setListener(new EmojiView.Listener() {
+            public boolean onBackspace() {
+                if (messageEditText.length() == 0) {
+                    return false;
+                }
+                messageEditText.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
+                return true;
+            }
+
+            public void onEmojiSelected(String symbol) {
+                if (messageEditText.length() + symbol.length() > captionMaxLength) {
+                    return;
+                }
+                int i = messageEditText.getSelectionEnd();
+                if (i < 0) {
+                    i = 0;
+                }
+                try {
+                    innerTextChange = true;
+                    CharSequence localCharSequence = Emoji.replaceEmoji(symbol, messageEditText.getPaint().getFontMetricsInt(), AndroidUtilities.dp(20), false);
+                    messageEditText.setText(messageEditText.getText().insert(i, localCharSequence));
+                    int j = i + localCharSequence.length();
+                    messageEditText.setSelection(j, j);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                } finally {
+                    innerTextChange = false;
+                }
+            }
+
+            public void onStickerSelected(TLRPC.Document sticker) {
+
+            }
+
+            @Override
+            public void onStickersSettingsClick() {
+
+            }
+
+            @Override
+            public void onGifSelected(TLRPC.Document gif) {
+
+            }
+
+            @Override
+            public void onGifTab(boolean opened) {
+
+            }
+
+            @Override
+            public void onStickersTab(boolean opened) {
+
+            }
+
+            @Override
+            public void onClearEmojiRecent() {
+
+            }
+
+            @Override
+            public void onShowStickerSet(TLRPC.StickerSet stickerSet, TLRPC.InputStickerSet inputStickerSet) {
+
+            }
+
+            @Override
+            public void onStickerSetAdd(TLRPC.StickerSetCovered stickerSet) {
+
+            }
+
+            @Override
+            public void onStickerSetRemove(TLRPC.StickerSetCovered stickerSet) {
+
+            }
+
+            @Override
+            public void onStickersGroupClick(int chatId) {
+
+            }
+        });
+        sizeNotifierLayout.addView(emojiView);
+    }
+
+    public void addEmojiToRecent(String code) {
+        createEmojiView();
+        emojiView.addEmojiToRecent(code);
+    }
+
+    public void replaceWithText(int start, int len, CharSequence text, boolean parseEmoji) {
         try {
-            StringBuilder builder = new StringBuilder(messageEditText.getText());
+            SpannableStringBuilder builder = new SpannableStringBuilder(messageEditText.getText());
             builder.replace(start, start + len, text);
+            if (parseEmoji) {
+                Emoji.replaceEmoji(builder, messageEditText.getPaint().getFontMetricsInt(), AndroidUtilities.dp(20), false);
+            }
             messageEditText.setText(builder);
             if (start + text.length() <= messageEditText.length()) {
                 messageEditText.setSelection(start + text.length());
@@ -363,7 +481,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
                 messageEditText.setSelection(messageEditText.length());
             }
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
     }
 
@@ -380,7 +498,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
                             try {
                                 messageEditText.requestFocus();
                             } catch (Exception e) {
-                                FileLog.e("tmessages", e);
+                                FileLog.e(e);
                             }
                         }
                     }
@@ -408,82 +526,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
     private void showPopup(int show) {
         if (show == 1) {
             if (emojiView == null) {
-                emojiView = new EmojiView(false, false, getContext());
-                emojiView.setListener(new EmojiView.Listener() {
-                    public boolean onBackspace() {
-                        if (messageEditText.length() == 0) {
-                            return false;
-                        }
-                        messageEditText.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
-                        return true;
-                    }
-
-                    public void onEmojiSelected(String symbol) {
-                        if (messageEditText.length() + symbol.length() > captionMaxLength) {
-                            return;
-                        }
-                        int i = messageEditText.getSelectionEnd();
-                        if (i < 0) {
-                            i = 0;
-                        }
-                        try {
-                            innerTextChange = true;
-                            CharSequence localCharSequence = Emoji.replaceEmoji(symbol, messageEditText.getPaint().getFontMetricsInt(), AndroidUtilities.dp(20), false);
-                            messageEditText.setText(messageEditText.getText().insert(i, localCharSequence));
-                            int j = i + localCharSequence.length();
-                            messageEditText.setSelection(j, j);
-                        } catch (Exception e) {
-                            FileLog.e("tmessages", e);
-                        } finally {
-                            innerTextChange = false;
-                        }
-                    }
-
-                    public void onStickerSelected(TLRPC.Document sticker) {
-
-                    }
-
-                    @Override
-                    public void onStickersSettingsClick() {
-
-                    }
-
-                    @Override
-                    public void onGifSelected(TLRPC.Document gif) {
-
-                    }
-
-                    @Override
-                    public void onGifTab(boolean opened) {
-
-                    }
-
-                    @Override
-                    public void onStickersTab(boolean opened) {
-
-                    }
-
-                    @Override
-                    public void onClearEmojiRecent() {
-
-                    }
-
-                    @Override
-                    public void onShowStickerSet(TLRPC.StickerSetCovered stickerSet) {
-
-                    }
-
-                    @Override
-                    public void onStickerSetAdd(TLRPC.StickerSetCovered stickerSet) {
-
-                    }
-
-                    @Override
-                    public void onStickerSetRemove(TLRPC.StickerSetCovered stickerSet) {
-
-                    }
-                });
-                sizeNotifierLayout.addView(emojiView);
+                createEmojiView();
             }
 
             emojiView.setVisibility(VISIBLE);
@@ -500,7 +543,7 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
             layoutParams.width = AndroidUtilities.displaySize.x;
             layoutParams.height = currentHeight;
             emojiView.setLayoutParams(layoutParams);
-            if (!AndroidUtilities.isInMultiwindow) {
+            if (!AndroidUtilities.isInMultiwindow && !forceFloatingEmoji) {
                 AndroidUtilities.hideKeyboard(messageEditText);
             }
             if (sizeNotifierLayout != null) {
@@ -534,12 +577,29 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
 
     private void openKeyboardInternal() {
         showPopup(AndroidUtilities.usingHardwareInput ? 0 : 2);
-        AndroidUtilities.showKeyboard(messageEditText);
+        openKeyboard();
     }
 
     public void openKeyboard() {
-        messageEditText.requestFocus();
+        int currentSelection;
+        try {
+            currentSelection = messageEditText.getSelectionStart();
+        } catch (Exception e) {
+            currentSelection = messageEditText.length();
+            FileLog.e(e);
+        }
+        MotionEvent event = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 0, 0, 0);
+        messageEditText.onTouchEvent(event);
+        event.recycle();
+        event = MotionEvent.obtain(0, 0, MotionEvent.ACTION_UP, 0, 0, 0);
+        messageEditText.onTouchEvent(event);
+        event.recycle();
         AndroidUtilities.showKeyboard(messageEditText);
+        try {
+            messageEditText.setSelection(currentSelection);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 
     public boolean isPopupShowing() {
@@ -551,12 +611,12 @@ public class PhotoViewerCaptionEnterView extends FrameLayout implements Notifica
     }
 
     public boolean isKeyboardVisible() {
-        return AndroidUtilities.usingHardwareInput && getLayoutParams() != null && ((FrameLayout.LayoutParams) getLayoutParams()).bottomMargin == 0 || keyboardVisible;
+        return AndroidUtilities.usingHardwareInput && getTag() != null || keyboardVisible;
     }
 
     @Override
     public void onSizeChanged(int height, boolean isWidthGreater) {
-        if (height > AndroidUtilities.dp(50) && keyboardVisible && !AndroidUtilities.isInMultiwindow) {
+        if (height > AndroidUtilities.dp(50) && keyboardVisible && !AndroidUtilities.isInMultiwindow && !forceFloatingEmoji) {
             if (isWidthGreater) {
                 keyboardHeightLand = height;
                 ApplicationLoader.applicationContext.getSharedPreferences("emoji", 0).edit().putInt("kbd_height_land3", keyboardHeightLand).commit();

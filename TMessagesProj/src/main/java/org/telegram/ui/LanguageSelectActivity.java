@@ -3,53 +3,71 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.ui;
 
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AbsListView;
-import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.TextView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
-import org.telegram.ui.Adapters.BaseFragmentAdapter;
-import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.messenger.support.widget.LinearLayoutManager;
+import org.telegram.messenger.support.widget.RecyclerView;
+import org.telegram.ui.ActionBar.AlertDialog;
+import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeDescription;
+import org.telegram.ui.Cells.LanguageCell;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.Components.EmptyTextProgressView;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Timer;
 import java.util.TimerTask;
 
-public class LanguageSelectActivity extends BaseFragment {
-    private BaseFragmentAdapter listAdapter;
-    private ListView listView;
+public class LanguageSelectActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
+
+    private ListAdapter listAdapter;
+    private RecyclerListView listView;
+    private ListAdapter searchListViewAdapter;
+    private EmptyTextProgressView emptyView;
+
     private boolean searchWas;
     private boolean searching;
-    private BaseFragmentAdapter searchListViewAdapter;
-    private TextView emptyTextView;
 
     private Timer searchTimer;
-    public ArrayList<LocaleController.LocaleInfo> searchResult;
+    private ArrayList<LocaleController.LocaleInfo> searchResult;
+    private ArrayList<LocaleController.LocaleInfo> sortedLanguages;
+
+    @Override
+    public boolean onFragmentCreate() {
+        fillLanguages();
+        LocaleController.getInstance().loadRemoteLanguages();
+        NotificationCenter.getInstance().addObserver(this, NotificationCenter.suggestedLangpack);
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        super.onFragmentDestroy();
+        NotificationCenter.getInstance().removeObserver(this, NotificationCenter.suggestedLangpack);
+    }
 
     @Override
     public View createView(Context context) {
@@ -82,7 +100,7 @@ public class LanguageSelectActivity extends BaseFragment {
                 searching = false;
                 searchWas = false;
                 if (listView != null) {
-                    emptyTextView.setVisibility(View.GONE);
+                    emptyView.setVisibility(View.GONE);
                     listView.setAdapter(listAdapter);
                 }
             }
@@ -101,94 +119,63 @@ public class LanguageSelectActivity extends BaseFragment {
         });
         item.getSearchField().setHint(LocaleController.getString("Search", R.string.Search));
 
-        listAdapter = new ListAdapter(context);
-        searchListViewAdapter = new SearchAdapter(context);
+        listAdapter = new ListAdapter(context, false);
+        searchListViewAdapter = new ListAdapter(context, true);
 
         fragmentView = new FrameLayout(context);
+        FrameLayout frameLayout = (FrameLayout) fragmentView;
 
-        LinearLayout emptyTextLayout = new LinearLayout(context);
-        emptyTextLayout.setVisibility(View.INVISIBLE);
-        emptyTextLayout.setOrientation(LinearLayout.VERTICAL);
-        ((FrameLayout) fragmentView).addView(emptyTextLayout);
-        FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) emptyTextLayout.getLayoutParams();
-        layoutParams.width = LayoutHelper.MATCH_PARENT;
-        layoutParams.height = LayoutHelper.MATCH_PARENT;
-        layoutParams.gravity = Gravity.TOP;
-        emptyTextLayout.setLayoutParams(layoutParams);
-        emptyTextLayout.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                return true;
-            }
-        });
+        emptyView = new EmptyTextProgressView(context);
+        emptyView.setText(LocaleController.getString("NoResult", R.string.NoResult));
+        emptyView.showTextView();
+        emptyView.setShowAtCenter(true);
+        frameLayout.addView(emptyView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        emptyTextView = new TextView(context);
-        emptyTextView.setTextColor(0xff808080);
-        emptyTextView.setTextSize(20);
-        emptyTextView.setGravity(Gravity.CENTER);
-        emptyTextView.setText(LocaleController.getString("NoResult", R.string.NoResult));
-        emptyTextLayout.addView(emptyTextView);
-        LinearLayout.LayoutParams layoutParams1 = (LinearLayout.LayoutParams) emptyTextView.getLayoutParams();
-        layoutParams1.width = LayoutHelper.MATCH_PARENT;
-        layoutParams1.height = LayoutHelper.MATCH_PARENT;
-        layoutParams1.weight = 0.5f;
-        emptyTextView.setLayoutParams(layoutParams1);
-
-        FrameLayout frameLayout = new FrameLayout(context);
-        emptyTextLayout.addView(frameLayout);
-        layoutParams1 = (LinearLayout.LayoutParams) frameLayout.getLayoutParams();
-        layoutParams1.width = LayoutHelper.MATCH_PARENT;
-        layoutParams1.height = LayoutHelper.MATCH_PARENT;
-        layoutParams1.weight = 0.5f;
-        frameLayout.setLayoutParams(layoutParams1);
-
-        listView = new ListView(context);
-        listView.setEmptyView(emptyTextLayout);
+        listView = new RecyclerListView(context);
+        listView.setEmptyView(emptyView);
+        listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         listView.setVerticalScrollBarEnabled(false);
-        listView.setDivider(null);
-        listView.setDividerHeight(0);
         listView.setAdapter(listAdapter);
-        ((FrameLayout) fragmentView).addView(listView);
-        layoutParams = (FrameLayout.LayoutParams) listView.getLayoutParams();
-        layoutParams.width = LayoutHelper.MATCH_PARENT;
-        layoutParams.height = LayoutHelper.MATCH_PARENT;
-        listView.setLayoutParams(layoutParams);
+        frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+        listView.setOnItemClickListener(new RecyclerListView.OnItemClickListener() {
             @Override
-            public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
+            public void onItemClick(View view, int position) {
+                if (getParentActivity() == null || parentLayout == null) {
+                    return;
+                }
                 LocaleController.LocaleInfo localeInfo = null;
                 if (searching && searchWas) {
-                    if (i >= 0 && i < searchResult.size()) {
-                        localeInfo = searchResult.get(i);
+                    if (position >= 0 && position < searchResult.size()) {
+                        localeInfo = searchResult.get(position);
                     }
                 } else {
-                    if (i >= 0 && i < LocaleController.getInstance().sortedLanguages.size()) {
-                        localeInfo = LocaleController.getInstance().sortedLanguages.get(i);
+                    if (position >= 0 && position < sortedLanguages.size()) {
+                        localeInfo = sortedLanguages.get(position);
                     }
                 }
                 if (localeInfo != null) {
-                    LocaleController.getInstance().applyLanguage(localeInfo, true);
-                    parentLayout.rebuildAllFragmentViews(false);
+                    LocaleController.getInstance().applyLanguage(localeInfo, true, false, false, true);
+                    parentLayout.rebuildAllFragmentViews(false, false);
                 }
                 finishFragment();
             }
         });
 
-        listView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+        listView.setOnItemLongClickListener(new RecyclerListView.OnItemLongClickListener() {
             @Override
-            public boolean onItemLongClick(AdapterView<?> adapterView, View view, int i, long l) {
+            public boolean onItemClick(View view, int position) {
                 LocaleController.LocaleInfo localeInfo = null;
                 if (searching && searchWas) {
-                    if (i >= 0 && i < searchResult.size()) {
-                        localeInfo = searchResult.get(i);
+                    if (position >= 0 && position < searchResult.size()) {
+                        localeInfo = searchResult.get(position);
                     }
                 } else {
-                    if (i >= 0 && i < LocaleController.getInstance().sortedLanguages.size()) {
-                        localeInfo = LocaleController.getInstance().sortedLanguages.get(i);
+                    if (position >= 0 && position < sortedLanguages.size()) {
+                        localeInfo = sortedLanguages.get(position);
                     }
                 }
-                if (localeInfo == null || localeInfo.pathToFile == null || getParentActivity() == null) {
+                if (localeInfo == null || localeInfo.pathToFile == null || getParentActivity() == null || localeInfo.isRemote()) {
                     return false;
                 }
                 final LocaleController.LocaleInfo finalLocaleInfo = localeInfo;
@@ -199,6 +186,7 @@ public class LanguageSelectActivity extends BaseFragment {
                     @Override
                     public void onClick(DialogInterface dialogInterface, int i) {
                         if (LocaleController.getInstance().deleteLanguage(finalLocaleInfo)) {
+                            fillLanguages();
                             if (searchResult != null) {
                                 searchResult.remove(finalLocaleInfo);
                             }
@@ -217,20 +205,42 @@ public class LanguageSelectActivity extends BaseFragment {
             }
         });
 
-        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+        listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
-            public void onScrollStateChanged(AbsListView absListView, int i) {
-                if (i == SCROLL_STATE_TOUCH_SCROLL && searching && searchWas) {
+            public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING && searching && searchWas) {
                     AndroidUtilities.hideKeyboard(getParentActivity().getCurrentFocus());
                 }
-            }
-
-            @Override
-            public void onScroll(AbsListView absListView, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
             }
         });
 
         return fragmentView;
+    }
+
+    @Override
+    public void didReceivedNotification(int id, Object... args) {
+        if (id == NotificationCenter.suggestedLangpack) {
+            if (listAdapter != null) {
+                fillLanguages();
+                listAdapter.notifyDataSetChanged();
+            }
+        }
+    }
+
+    private void fillLanguages() {
+        sortedLanguages = new ArrayList<>(LocaleController.getInstance().languages);
+        final LocaleController.LocaleInfo currentLocale = LocaleController.getInstance().getCurrentLocaleInfo();
+        Collections.sort(sortedLanguages, new Comparator<LocaleController.LocaleInfo>() {
+            @Override
+            public int compare(LocaleController.LocaleInfo o, LocaleController.LocaleInfo o2) {
+                if (o == currentLocale) {
+                    return -1;
+                } else if (o2 == currentLocale) {
+                    return 1;
+                }
+                return o.name.compareTo(o2.name);
+            }
+        });
     }
 
     @Override
@@ -250,7 +260,7 @@ public class LanguageSelectActivity extends BaseFragment {
                     searchTimer.cancel();
                 }
             } catch (Exception e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
             searchTimer = new Timer();
             searchTimer.schedule(new TimerTask() {
@@ -260,7 +270,7 @@ public class LanguageSelectActivity extends BaseFragment {
                         searchTimer.cancel();
                         searchTimer = null;
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                     processSearch(query);
                 }
@@ -281,7 +291,8 @@ public class LanguageSelectActivity extends BaseFragment {
                 long time = System.currentTimeMillis();
                 ArrayList<LocaleController.LocaleInfo> resultArray = new ArrayList<>();
 
-                for (LocaleController.LocaleInfo c : LocaleController.getInstance().sortedLanguages) {
+                for (int a = 0; a < sortedLanguages.size(); a++) {
+                    LocaleController.LocaleInfo c = sortedLanguages.get(a);
                     if (c.name.toLowerCase().startsWith(query) || c.nameEnglish.toLowerCase().startsWith(query)) {
                         resultArray.add(c);
                     }
@@ -302,139 +313,86 @@ public class LanguageSelectActivity extends BaseFragment {
         });
     }
 
-    private class SearchAdapter extends BaseFragmentAdapter {
+    private class ListAdapter extends RecyclerListView.SelectionAdapter {
+
         private Context mContext;
+        private boolean search;
 
-        public SearchAdapter(Context context) {
+        public ListAdapter(Context context, boolean isSearch) {
             mContext = context;
+            search = isSearch;
         }
 
         @Override
-        public boolean areAllItemsEnabled() {
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
             return true;
         }
 
         @Override
-        public boolean isEnabled(int i) {
-            return true;
-        }
-
-        @Override
-        public int getCount() {
-            if (searchResult == null) {
-                return 0;
+        public int getItemCount() {
+            if (search) {
+                if (searchResult == null) {
+                    return 0;
+                }
+                return searchResult.size();
+            } else {
+                return sortedLanguages.size();
             }
-            return searchResult.size();
         }
 
         @Override
-        public Object getItem(int i) {
-            return null;
+        public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            return new RecyclerListView.Holder(new LanguageCell(mContext, false));
         }
 
         @Override
-        public long getItemId(int i) {
-            return i;
-        }
-
-        @Override
-        public boolean hasStableIds() {
-            return false;
-        }
-
-        @Override
-        public View getView(int i, View view, ViewGroup viewGroup) {
-            if (view == null) {
-                view = new TextSettingsCell(mContext);
+        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            LanguageCell textSettingsCell = (LanguageCell) holder.itemView;
+            LocaleController.LocaleInfo localeInfo;
+            boolean last;
+            if (search) {
+                localeInfo = searchResult.get(position);
+                last = position == searchResult.size() - 1;
+            } else {
+                localeInfo = sortedLanguages.get(position);
+                last = position == sortedLanguages.size() - 1;
             }
-
-            LocaleController.LocaleInfo c = searchResult.get(i);
-            ((TextSettingsCell) view).setText(c.name, i != searchResult.size() - 1);
-
-            return view;
+            if (localeInfo.isLocal()) {
+                textSettingsCell.setLanguage(localeInfo, String.format("%1$s (%2$s)", localeInfo.name, LocaleController.getString("LanguageCustom", R.string.LanguageCustom)), !last);
+            } else {
+                textSettingsCell.setLanguage(localeInfo, null, !last);
+            }
+            textSettingsCell.setLanguageSelected(localeInfo == LocaleController.getInstance().getCurrentLocaleInfo());
         }
 
         @Override
         public int getItemViewType(int i) {
             return 0;
-        }
-
-        @Override
-        public int getViewTypeCount() {
-            return 1;
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return searchResult == null || searchResult.size() == 0;
         }
     }
 
-    private class ListAdapter extends BaseFragmentAdapter {
-        private Context mContext;
+    @Override
+    public ThemeDescription[] getThemeDescriptions() {
+        return new ThemeDescription[]{
+                new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite),
 
-        public ListAdapter(Context context) {
-            mContext = context;
-        }
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault),
+                new ThemeDescription(listView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SEARCH, null, null, null, null, Theme.key_actionBarDefaultSearch),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SEARCHPLACEHOLDER, null, null, null, null, Theme.key_actionBarDefaultSearchPlaceholder),
 
-        @Override
-        public boolean areAllItemsEnabled() {
-            return true;
-        }
+                new ThemeDescription(listView, ThemeDescription.FLAG_SELECTOR, null, null, null, null, Theme.key_listSelector),
 
-        @Override
-        public boolean isEnabled(int i) {
-            return true;
-        }
+                new ThemeDescription(emptyView, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_emptyListPlaceholder),
 
-        @Override
-        public int getCount() {
-            if (LocaleController.getInstance().sortedLanguages == null) {
-                return 0;
-            }
-            return LocaleController.getInstance().sortedLanguages.size();
-        }
+                new ThemeDescription(listView, 0, new Class[]{View.class}, Theme.dividerPaint, null, null, Theme.key_divider),
 
-        @Override
-        public Object getItem(int i) {
-            return null;
-        }
-
-        @Override
-        public long getItemId(int i) {
-            return i;
-        }
-
-        @Override
-        public boolean hasStableIds() {
-            return false;
-        }
-
-        @Override
-        public View getView(int i, View view, ViewGroup viewGroup) {
-            if (view == null) {
-                view = new TextSettingsCell(mContext);
-            }
-
-            LocaleController.LocaleInfo localeInfo = LocaleController.getInstance().sortedLanguages.get(i);
-            ((TextSettingsCell) view).setText(localeInfo.name, i != LocaleController.getInstance().sortedLanguages.size() - 1);
-
-            return view;
-        }
-
-        @Override
-        public int getItemViewType(int i) {
-            return 0;
-        }
-
-        @Override
-        public int getViewTypeCount() {
-            return 1;
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return LocaleController.getInstance().sortedLanguages == null || LocaleController.getInstance().sortedLanguages.size() == 0;
-        }
+                new ThemeDescription(listView, 0, new Class[]{LanguageCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(listView, 0, new Class[]{LanguageCell.class}, new String[]{"textView2"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText3),
+                new ThemeDescription(listView, 0, new Class[]{LanguageCell.class}, new String[]{"checkImage"}, null, null, null, Theme.key_featuredStickers_addedIcon),
+        };
     }
 }

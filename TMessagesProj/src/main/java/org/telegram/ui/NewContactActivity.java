@@ -3,20 +3,21 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.ui;
 
 import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Vibrator;
 import android.telephony.TelephonyManager;
@@ -32,7 +33,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.AdapterView;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -40,7 +40,6 @@ import android.widget.TextView;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.AnimatorListenerAdapterProxy;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.FileLog;
@@ -54,10 +53,15 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeDescription;
+import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.ContextProgressView;
+import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.HintEditText;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -74,14 +78,16 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
 
     private ActionBarMenuItem editDoneItem;
     private ContextProgressView editDoneItemProgress;
-    private EditText firstNameField;
-    private EditText lastNameField;
-    private EditText codeField;
+    private EditTextBoldCursor firstNameField;
+    private EditTextBoldCursor lastNameField;
+    private EditTextBoldCursor codeField;
     private HintEditText phoneField;
     private BackupImageView avatarImage;
     private TextView countryButton;
     private AvatarDrawable avatarDrawable;
     private AnimatorSet editDoneItemAnimation;
+    private TextView textView;
+    private View lineView;
 
     private ArrayList<String> countriesArray = new ArrayList<>();
     private HashMap<String, String> countriesMap = new HashMap<>();
@@ -136,7 +142,7 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
                     }
                     donePressed = true;
                     showEditDoneProgress(true, true);
-                    TLRPC.TL_contacts_importContacts req = new TLRPC.TL_contacts_importContacts();
+                    final TLRPC.TL_contacts_importContacts req = new TLRPC.TL_contacts_importContacts();
                     final TLRPC.TL_inputPhoneContact inputPhoneContact = new TLRPC.TL_inputPhoneContact();
                     inputPhoneContact.first_name = firstNameField.getText().toString();
                     inputPhoneContact.last_name = lastNameField.getText().toString();
@@ -168,10 +174,10 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
                                                 public void onClick(DialogInterface dialog, int which) {
                                                     try {
                                                         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.fromParts("sms", inputPhoneContact.phone, null));
-                                                        intent.putExtra("sms_body", LocaleController.getString("InviteText", R.string.InviteText));
+                                                        intent.putExtra("sms_body", ContactsController.getInstance().getInviteText(1));
                                                         getParentActivity().startActivityForResult(intent, 500);
                                                     } catch (Exception e) {
-                                                        FileLog.e("tmessages", e);
+                                                        FileLog.e(e);
                                                     }
                                                 }
                                             });
@@ -179,11 +185,7 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
                                         }
                                     } else {
                                         showEditDoneProgress(false, true);
-                                        if (error == null || error.text.startsWith("FLOOD_WAIT")) {
-                                            needShowAlert(LocaleController.getString("AppName", R.string.AppName), LocaleController.getString("FloodWait", R.string.FloodWait));
-                                        } else {
-                                            needShowAlert(LocaleController.getString("AppName", R.string.AppName), LocaleController.getString("ErrorOccurred", R.string.ErrorOccurred) + "\n" + error.text);
-                                        }
+                                        AlertsCreator.processError(error, NewContactActivity.this, req);
                                     }
                                 }
                             });
@@ -224,18 +226,21 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
         avatarImage.setImageDrawable(avatarDrawable);
         frameLayout.addView(avatarImage, LayoutHelper.createFrame(60, 60, Gravity.LEFT | Gravity.TOP, 0, 9, 0, 0));
 
-        firstNameField = new EditText(context);
+        firstNameField = new EditTextBoldCursor(context);
         firstNameField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
-        firstNameField.setHintTextColor(0xff979797);
-        firstNameField.setTextColor(0xff212121);
+        firstNameField.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
+        firstNameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         firstNameField.setMaxLines(1);
         firstNameField.setLines(1);
         firstNameField.setSingleLine(true);
+        firstNameField.setBackgroundDrawable(Theme.createEditTextDrawable(context, false));
         firstNameField.setGravity(Gravity.LEFT);
         firstNameField.setInputType(InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         firstNameField.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         firstNameField.setHint(LocaleController.getString("FirstName", R.string.FirstName));
-        AndroidUtilities.clearCursorDrawable(firstNameField);
+        firstNameField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        firstNameField.setCursorSize(AndroidUtilities.dp(20));
+        firstNameField.setCursorWidth(1.5f);
         frameLayout.addView(firstNameField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 34, Gravity.LEFT | Gravity.TOP, 84, 0, 0, 0));
         firstNameField.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -266,10 +271,11 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
             }
         });
 
-        lastNameField = new EditText(context);
+        lastNameField = new EditTextBoldCursor(context);
         lastNameField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
-        lastNameField.setHintTextColor(0xff979797);
-        lastNameField.setTextColor(0xff212121);
+        lastNameField.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
+        lastNameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        lastNameField.setBackgroundDrawable(Theme.createEditTextDrawable(context, false));
         lastNameField.setMaxLines(1);
         lastNameField.setLines(1);
         lastNameField.setSingleLine(true);
@@ -277,7 +283,9 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
         lastNameField.setInputType(InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         lastNameField.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         lastNameField.setHint(LocaleController.getString("LastName", R.string.LastName));
-        AndroidUtilities.clearCursorDrawable(lastNameField);
+        lastNameField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        lastNameField.setCursorSize(AndroidUtilities.dp(20));
+        lastNameField.setCursorWidth(1.5f);
         frameLayout.addView(lastNameField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 34, Gravity.LEFT | Gravity.TOP, 84, 44, 0, 0));
         lastNameField.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -311,7 +319,7 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
         countryButton = new TextView(context);
         countryButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         countryButton.setPadding(AndroidUtilities.dp(6), AndroidUtilities.dp(10), AndroidUtilities.dp(6), 0);
-        countryButton.setTextColor(0xff212121);
+        countryButton.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         countryButton.setMaxLines(1);
         countryButton.setSingleLine(true);
         countryButton.setEllipsize(TextUtils.TruncateAt.END);
@@ -321,10 +329,10 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
         countryButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                CountrySelectActivity fragment = new CountrySelectActivity();
+                CountrySelectActivity fragment = new CountrySelectActivity(true);
                 fragment.setCountrySelectActivityDelegate(new CountrySelectActivity.CountrySelectActivityDelegate() {
                     @Override
-                    public void didSelectCountry(String name) {
+                    public void didSelectCountry(String name, String shortName) {
                         selectCountry(name);
                         AndroidUtilities.runOnUIThread(new Runnable() {
                             @Override
@@ -340,25 +348,28 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
             }
         });
 
-        View view = new View(context);
-        view.setPadding(AndroidUtilities.dp(8), 0, AndroidUtilities.dp(8), 0);
-        view.setBackgroundColor(0xffdbdbdb);
-        linearLayout.addView(view, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 0, -17.5f, 0, 0));
+        lineView = new View(context);
+        lineView.setPadding(AndroidUtilities.dp(8), 0, AndroidUtilities.dp(8), 0);
+        lineView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayLine));
+        linearLayout.addView(lineView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 1, 0, -17.5f, 0, 0));
 
         LinearLayout linearLayout2 = new LinearLayout(context);
         linearLayout2.setOrientation(HORIZONTAL);
         linearLayout.addView(linearLayout2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 20, 0, 0));
 
-        TextView textView = new TextView(context);
+        textView = new TextView(context);
         textView.setText("+");
-        textView.setTextColor(0xff212121);
+        textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         linearLayout2.addView(textView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
-        codeField = new EditText(context);
+        codeField = new EditTextBoldCursor(context);
         codeField.setInputType(InputType.TYPE_CLASS_PHONE);
-        codeField.setTextColor(0xff212121);
-        AndroidUtilities.clearCursorDrawable(codeField);
+        codeField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        codeField.setBackgroundDrawable(Theme.createEditTextDrawable(context, false));
+        codeField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        codeField.setCursorSize(AndroidUtilities.dp(20));
+        codeField.setCursorWidth(1.5f);
         codeField.setPadding(AndroidUtilities.dp(10), 0, 0, 0);
         codeField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         codeField.setMaxLines(1);
@@ -458,10 +469,13 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
 
         phoneField = new HintEditText(context);
         phoneField.setInputType(InputType.TYPE_CLASS_PHONE);
-        phoneField.setTextColor(0xff212121);
-        phoneField.setHintTextColor(0xff979797);
+        phoneField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        phoneField.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
+        phoneField.setBackgroundDrawable(Theme.createEditTextDrawable(context, false));
         phoneField.setPadding(0, 0, 0, 0);
-        AndroidUtilities.clearCursorDrawable(phoneField);
+        phoneField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        phoneField.setCursorSize(AndroidUtilities.dp(20));
+        phoneField.setCursorWidth(1.5f);
         phoneField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         phoneField.setMaxLines(1);
         phoneField.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
@@ -568,7 +582,7 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
             }
             reader.close();
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
 
         Collections.sort(countriesArray, new Comparator<String>() {
@@ -586,7 +600,7 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
                 country = telephonyManager.getSimCountryIso().toUpperCase();
             }
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
 
         if (country != null) {
@@ -708,7 +722,7 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
                         ObjectAnimator.ofFloat(editDoneItem.getImageView(), "alpha", 1.0f));
 
             }
-            editDoneItemAnimation.addListener(new AnimatorListenerAdapterProxy() {
+            editDoneItemAnimation.addListener(new AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(Animator animation) {
                     if (editDoneItemAnimation != null && editDoneItemAnimation.equals(animation)) {
@@ -732,14 +746,63 @@ public class NewContactActivity extends BaseFragment implements AdapterView.OnIt
         }
     }
 
-    private void needShowAlert(String title, String text) {
-        if (text == null || getParentActivity() == null) {
-            return;
-        }
-        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-        builder.setTitle(title);
-        builder.setMessage(text);
-        builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), null);
-        showDialog(builder.create());
+    @Override
+    public ThemeDescription[] getThemeDescriptions() {
+        ThemeDescription.ThemeDescriptionDelegate сellDelegate = new ThemeDescription.ThemeDescriptionDelegate() {
+            @Override
+            public void didSetColor(int color) {
+                if (avatarImage != null) {
+                    avatarDrawable.setInfo(5, firstNameField.getText().toString(), lastNameField.getText().toString(), false);
+                    avatarImage.invalidate();
+                }
+            }
+        };
+
+        return new ThemeDescription[]{
+                new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite),
+
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault),
+                new ThemeDescription(fragmentView, ThemeDescription.FLAG_LISTGLOWCOLOR, null, null, null, null, Theme.key_actionBarDefault),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_ITEMSCOLOR, null, null, null, null, Theme.key_actionBarDefaultIcon),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_TITLECOLOR, null, null, null, null, Theme.key_actionBarDefaultTitle),
+                new ThemeDescription(actionBar, ThemeDescription.FLAG_AB_SELECTORCOLOR, null, null, null, null, Theme.key_actionBarDefaultSelector),
+
+                new ThemeDescription(firstNameField, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(firstNameField, ThemeDescription.FLAG_HINTTEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteHintText),
+                new ThemeDescription(firstNameField, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_windowBackgroundWhiteInputField),
+                new ThemeDescription(firstNameField, ThemeDescription.FLAG_BACKGROUNDFILTER | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, null, null, null, null, Theme.key_windowBackgroundWhiteInputFieldActivated),
+
+                new ThemeDescription(lastNameField, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(lastNameField, ThemeDescription.FLAG_HINTTEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteHintText),
+                new ThemeDescription(lastNameField, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_windowBackgroundWhiteInputField),
+                new ThemeDescription(lastNameField, ThemeDescription.FLAG_BACKGROUNDFILTER | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, null, null, null, null, Theme.key_windowBackgroundWhiteInputFieldActivated),
+
+                new ThemeDescription(codeField, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(codeField, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_windowBackgroundWhiteInputField),
+                new ThemeDescription(codeField, ThemeDescription.FLAG_BACKGROUNDFILTER | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, null, null, null, null, Theme.key_windowBackgroundWhiteInputFieldActivated),
+
+                new ThemeDescription(phoneField, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+                new ThemeDescription(phoneField, ThemeDescription.FLAG_HINTTEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteHintText),
+                new ThemeDescription(phoneField, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_windowBackgroundWhiteInputField),
+                new ThemeDescription(phoneField, ThemeDescription.FLAG_BACKGROUNDFILTER | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, null, null, null, null, Theme.key_windowBackgroundWhiteInputFieldActivated),
+
+                new ThemeDescription(textView, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+
+                new ThemeDescription(lineView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhiteGrayLine),
+
+                new ThemeDescription(countryButton, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText),
+
+                new ThemeDescription(editDoneItemProgress, 0, null, null, null, null, Theme.key_contextProgressInner2),
+                new ThemeDescription(editDoneItemProgress, 0, null, null, null, null, Theme.key_contextProgressOuter2),
+
+                new ThemeDescription(null, 0, null, null, new Drawable[]{Theme.avatar_photoDrawable, Theme.avatar_broadcastDrawable, Theme.avatar_savedDrawable}, сellDelegate, Theme.key_avatar_text),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundRed),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundOrange),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundViolet),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundGreen),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundCyan),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundBlue),
+                new ThemeDescription(null, 0, null, null, null, сellDelegate, Theme.key_avatar_backgroundPink),
+        };
     }
 }

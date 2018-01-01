@@ -3,7 +3,7 @@
  * It is licensed under GNU GPL v. 2 or later.
  * You should have received a copy of the license in this archive (see LICENSE).
  *
- * Copyright Nikolai Kudashov, 2013-2016.
+ * Copyright Nikolai Kudashov, 2013-2017.
  */
 
 package org.telegram.messenger;
@@ -24,7 +24,9 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.text.TextUtils;
 
+import org.telegram.messenger.secretmedia.EncryptedFileInputStream;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -37,7 +39,6 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
@@ -69,6 +70,7 @@ public class ImageLoader {
     private DispatchQueue imageLoadQueue = new DispatchQueue("imageLoadQueue");
     private ConcurrentHashMap<String, Float> fileProgresses = new ConcurrentHashMap<>();
     private HashMap<String, ThumbGenerateTask> thumbGenerateTasks = new HashMap<>();
+    private HashMap<String, Integer> forceLoadingImages = new HashMap<>();
     private static byte[] bytes;
     private static byte[] bytesThumb;
     private static byte[] header = new byte[12];
@@ -137,8 +139,8 @@ public class ImageLoader {
             try {
                 URL downloadUrl = new URL(url);
                 httpConnection = downloadUrl.openConnection();
-                httpConnection.addRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 4.4; Nexus 5 Build/_BuildID_) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/30.0.0.0 Mobile Safari/537.36");
-                httpConnection.addRequestProperty("Referer", "google.com");
+                httpConnection.addRequestProperty("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 10_0 like Mac OS X) AppleWebKit/602.1.38 (KHTML, like Gecko) Version/10.0 Mobile/14A5297c Safari/602.1");
+                //httpConnection.addRequestProperty("Referer", "google.com");
                 httpConnection.setConnectTimeout(5000);
                 httpConnection.setReadTimeout(5000);
                 if (httpConnection instanceof HttpURLConnection) {
@@ -151,8 +153,8 @@ public class ImageLoader {
                         downloadUrl = new URL(newUrl);
                         httpConnection = downloadUrl.openConnection();
                         httpConnection.setRequestProperty("Cookie", cookies);
-                        httpConnection.addRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 4.4; Nexus 5 Build/_BuildID_) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/30.0.0.0 Mobile Safari/537.36");
-                        httpConnection.addRequestProperty("Referer", "google.com");
+                        httpConnection.addRequestProperty("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 10_0 like Mac OS X) AppleWebKit/602.1.38 (KHTML, like Gecko) Version/10.0 Mobile/14A5297c Safari/602.1");
+                        //httpConnection.addRequestProperty("Referer", "google.com");
                     }
                 }
                 httpConnection.connect();
@@ -173,7 +175,7 @@ public class ImageLoader {
                 } else if (e instanceof FileNotFoundException) {
                     canRetry = false;
                 }
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
 
             if (canRetry) {
@@ -185,7 +187,7 @@ public class ImageLoader {
                         }
                     }
                 } catch (Exception e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
                 if (httpConnection != null) {
                     try {
@@ -200,7 +202,7 @@ public class ImageLoader {
                             }
                         }
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                 }
 
@@ -230,12 +232,12 @@ public class ImageLoader {
                                     break;
                                 }
                             } catch (Exception e) {
-                                FileLog.e("tmessages", e);
+                                FileLog.e(e);
                                 break;
                             }
                         }
                     } catch (Throwable e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                 }
 
@@ -245,7 +247,7 @@ public class ImageLoader {
                         fileOutputStream = null;
                     }
                 } catch (Throwable e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
 
                 try {
@@ -253,7 +255,7 @@ public class ImageLoader {
                         httpConnectionStream.close();
                     }
                 } catch (Throwable e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
             }
 
@@ -278,7 +280,7 @@ public class ImageLoader {
         private int imageSize;
         private long lastProgressTime;
         private boolean canRetry = true;
-        private URLConnection httpConnection = null;
+        private HttpURLConnection httpConnection = null;
 
         public HttpImageTask(CacheImage cacheImage, int size) {
             this.cacheImage = cacheImage;
@@ -311,14 +313,12 @@ public class ImageLoader {
             if (!isCancelled()) {
                 try {
                     URL downloadUrl = new URL(cacheImage.httpUrl);
-                    httpConnection = downloadUrl.openConnection();
-                    httpConnection.addRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 4.4; Nexus 5 Build/_BuildID_) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/30.0.0.0 Mobile Safari/537.36");
-                    httpConnection.addRequestProperty("Referer", "google.com");
+                    httpConnection = (HttpURLConnection) downloadUrl.openConnection();
+                    httpConnection.addRequestProperty("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 10_0 like Mac OS X) AppleWebKit/602.1.38 (KHTML, like Gecko) Version/10.0 Mobile/14A5297c Safari/602.1");
+                    //httpConnection.addRequestProperty("Referer", "google.com");
                     httpConnection.setConnectTimeout(5000);
                     httpConnection.setReadTimeout(5000);
-                    if (httpConnection instanceof HttpURLConnection) {
-                        ((HttpURLConnection) httpConnection).setInstanceFollowRedirects(true);
-                    }
+                    httpConnection.setInstanceFollowRedirects(true);
                     if (!isCancelled()) {
                         httpConnection.connect();
                         httpConnectionStream = httpConnection.getInputStream();
@@ -338,20 +338,20 @@ public class ImageLoader {
                     } else if (e instanceof FileNotFoundException) {
                         canRetry = false;
                     }
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
             }
 
             if (!isCancelled()) {
                 try {
                     if (httpConnection != null && httpConnection instanceof HttpURLConnection) {
-                        int code = ((HttpURLConnection) httpConnection).getResponseCode();
+                        int code = httpConnection.getResponseCode();
                         if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_ACCEPTED && code != HttpURLConnection.HTTP_NOT_MODIFIED) {
                             canRetry = false;
                         }
                     }
                 } catch (Exception e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
                 if (imageSize == 0 && httpConnection != null) {
                     try {
@@ -366,7 +366,7 @@ public class ImageLoader {
                             }
                         }
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                 }
 
@@ -396,12 +396,12 @@ public class ImageLoader {
                                     break;
                                 }
                             } catch (Exception e) {
-                                FileLog.e("tmessages", e);
+                                FileLog.e(e);
                                 break;
                             }
                         }
                     } catch (Throwable e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                 }
             }
@@ -412,7 +412,14 @@ public class ImageLoader {
                     fileOutputStream = null;
                 }
             } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
+            }
+            try {
+                if (httpConnection != null) {
+                    httpConnection.disconnect();
+                }
+            } catch (Throwable ignore) {
+
             }
 
             try {
@@ -420,7 +427,7 @@ public class ImageLoader {
                     httpConnectionStream.close();
                 }
             } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
 
             if (done) {
@@ -564,7 +571,7 @@ public class ImageLoader {
                 try {
                     stream.close();
                 } catch (Exception e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
                 final BitmapDrawable bitmapDrawable = new BitmapDrawable(originalBitmap);
                 AndroidUtilities.runOnUIThread(new Runnable() {
@@ -591,7 +598,7 @@ public class ImageLoader {
                     }
                 });
             } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
                 removeTask();
             }
         }
@@ -632,6 +639,7 @@ public class ImageLoader {
                 boolean mediaIsVideo = false;
                 Bitmap image = null;
                 File cacheFileFinal = cacheImage.finalFilePath;
+                boolean inEncryptedFile = cacheImage.encryptionKeyPath != null && cacheFileFinal != null && cacheFileFinal.getAbsolutePath().endsWith(".enc");
                 boolean canDeleteFile = true;
                 boolean useNativeWebpLoaded = false;
 
@@ -640,7 +648,7 @@ public class ImageLoader {
                     try {
                         randomAccessFile = new RandomAccessFile(cacheFileFinal, "r");
                         byte[] bytes;
-                        if (cacheImage.thumb) {
+                        if (cacheImage.selfThumb) {
                             bytes = headerThumb;
                         } else {
                             bytes = header;
@@ -653,19 +661,19 @@ public class ImageLoader {
                         }
                         randomAccessFile.close();
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     } finally {
                         if (randomAccessFile != null) {
                             try {
                                 randomAccessFile.close();
                             } catch (Exception e) {
-                                FileLog.e("tmessages", e);
+                                FileLog.e(e);
                             }
                         }
                     }
                 }
 
-                if (cacheImage.thumb) {
+                if (cacheImage.selfThumb) {
                     int blurType = 0;
                     if (cacheImage.filter != null) {
                         if (cacheImage.filter.contains("b2")) {
@@ -712,9 +720,18 @@ public class ImageLoader {
                                     bytesThumb = data = new byte[len];
                                 }
                                 f.readFully(data, 0, len);
+                                f.close();
+                                if (inEncryptedFile) {
+                                    EncryptedFileInputStream.decryptBytesWithKeyFile(data, 0, len, cacheImage.encryptionKeyPath);
+                                }
                                 image = BitmapFactory.decodeByteArray(data, 0, len, opts);
                             } else {
-                                FileInputStream is = new FileInputStream(cacheFileFinal);
+                                FileInputStream is;
+                                if (inEncryptedFile) {
+                                    is = new EncryptedFileInputStream(cacheFileFinal, cacheImage.encryptionKeyPath);
+                                } else {
+                                    is = new FileInputStream(cacheFileFinal);
+                                }
                                 image = BitmapFactory.decodeStream(is, null, opts);
                                 is.close();
                             }
@@ -744,16 +761,18 @@ public class ImageLoader {
                             }
                         }
                     } catch (Throwable e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                 } else {
                     try {
+                        String mediaThumbPath = null;
                         if (cacheImage.httpUrl != null) {
                             if (cacheImage.httpUrl.startsWith("thumb://")) {
                                 int idx = cacheImage.httpUrl.indexOf(":", 8);
                                 if (idx >= 0) {
                                     mediaId = Long.parseLong(cacheImage.httpUrl.substring(8, idx));
                                     mediaIsVideo = false;
+                                    mediaThumbPath = cacheImage.httpUrl.substring(idx + 1);
                                 }
                                 canDeleteFile = false;
                             } else if (cacheImage.httpUrl.startsWith("vthumb://")) {
@@ -800,14 +819,19 @@ public class ImageLoader {
                             if (w_filter != 0 && h_filter != 0) {
                                 opts.inJustDecodeBounds = true;
 
-                                if (mediaId != null) {
+                                if (mediaId != null && mediaThumbPath == null) {
                                     if (mediaIsVideo) {
                                         MediaStore.Video.Thumbnails.getThumbnail(ApplicationLoader.applicationContext.getContentResolver(), mediaId, MediaStore.Video.Thumbnails.MINI_KIND, opts);
                                     } else {
                                         MediaStore.Images.Thumbnails.getThumbnail(ApplicationLoader.applicationContext.getContentResolver(), mediaId, MediaStore.Images.Thumbnails.MINI_KIND, opts);
                                     }
                                 } else {
-                                    FileInputStream is = new FileInputStream(cacheFileFinal);
+                                    FileInputStream is;
+                                    if (inEncryptedFile) {
+                                        is = new EncryptedFileInputStream(cacheFileFinal, cacheImage.encryptionKeyPath);
+                                    } else {
+                                        is = new FileInputStream(cacheFileFinal);
+                                    }
                                     image = BitmapFactory.decodeStream(is, null, opts);
                                     is.close();
                                 }
@@ -821,6 +845,23 @@ public class ImageLoader {
                                 opts.inJustDecodeBounds = false;
                                 opts.inSampleSize = (int) scaleFactor;
                             }
+                        } else if (mediaThumbPath != null) {
+                            opts.inJustDecodeBounds = true;
+                            FileInputStream is = new FileInputStream(cacheFileFinal);
+                            image = BitmapFactory.decodeStream(is, null, opts);
+                            is.close();
+                            float photoW = opts.outWidth;
+                            float photoH = opts.outHeight;
+                            float scaleFactor = Math.max(photoW / 512, photoH / 384);
+                            if (scaleFactor < 1) {
+                                scaleFactor = 1;
+                            }
+                            opts.inJustDecodeBounds = false;
+                            int sample = 1;
+                            do {
+                                sample *= 2;
+                            } while (sample * 2 < scaleFactor);
+                            opts.inSampleSize = sample;
                         }
                         synchronized (sync) {
                             if (isCancelled) {
@@ -838,7 +879,7 @@ public class ImageLoader {
                         }
 
                         opts.inDither = false;
-                        if (mediaId != null) {
+                        if (mediaId != null && mediaThumbPath == null) {
                             if (mediaIsVideo) {
                                 image = MediaStore.Video.Thumbnails.getThumbnail(ApplicationLoader.applicationContext.getContentResolver(), mediaId, MediaStore.Video.Thumbnails.MINI_KIND, opts);
                             } else {
@@ -866,9 +907,18 @@ public class ImageLoader {
                                         bytes = data = new byte[len];
                                     }
                                     f.readFully(data, 0, len);
+                                    f.close();
+                                    if (inEncryptedFile) {
+                                        EncryptedFileInputStream.decryptBytesWithKeyFile(data, 0, len, cacheImage.encryptionKeyPath);
+                                    }
                                     image = BitmapFactory.decodeByteArray(data, 0, len, opts);
                                 } else {
-                                    FileInputStream is = new FileInputStream(cacheFileFinal);
+                                    FileInputStream is;
+                                    if (inEncryptedFile) {
+                                        is = new EncryptedFileInputStream(cacheFileFinal, cacheImage.encryptionKeyPath);
+                                    } else {
+                                        is = new FileInputStream(cacheFileFinal);
+                                    }
                                     image = BitmapFactory.decodeStream(is, null, opts);
                                     is.close();
                                 }
@@ -902,8 +952,8 @@ public class ImageLoader {
                                 Utilities.pinBitmap(image);
                             }
                         }
-                    } catch (Throwable e) {
-                        //don't promt
+                    } catch (Throwable ignore) {
+
                     }
                 }
                 Thread.interrupted();
@@ -953,53 +1003,6 @@ public class ImageLoader {
         }
     }
 
-    public class VMRuntimeHack {
-        private Object runtime = null;
-        private Method trackAllocation = null;
-        private Method trackFree = null;
-
-        public boolean trackAlloc(long size) {
-            if (runtime == null) {
-                return false;
-            }
-            try {
-                Object res = trackAllocation.invoke(runtime, size);
-                return (res instanceof Boolean) ? (Boolean) res : true;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-        public boolean trackFree(long size) {
-            if (runtime == null) {
-                return false;
-            }
-            try {
-                Object res = trackFree.invoke(runtime, size);
-                return (res instanceof Boolean) ? (Boolean) res : true;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        public VMRuntimeHack() {
-            try {
-                Class cl = Class.forName("dalvik.system.VMRuntime");
-                Method getRt = cl.getMethod("getRuntime", new Class[0]);
-                Object[] objects = new Object[0];
-                runtime = getRt.invoke(null, objects);
-                trackAllocation = cl.getMethod("trackExternalAllocation", new Class[]{long.class});
-                trackFree = cl.getMethod("trackExternalFree", new Class[]{long.class});
-            } catch (Exception e) {
-                FileLog.e("tmessages", e);
-                runtime = null;
-                trackAllocation = null;
-                trackFree = null;
-            }
-        }
-    }
-
     private class CacheImage {
         protected String key;
         protected String url;
@@ -1007,10 +1010,11 @@ public class ImageLoader {
         protected String ext;
         protected TLObject location;
         protected boolean animatedFile;
+        protected boolean selfThumb;
 
         protected File finalFilePath;
         protected File tempFilePath;
-        protected boolean thumb;
+        protected File encryptionKeyPath;
 
         protected String httpUrl;
         protected HttpImageTask httpTask;
@@ -1019,24 +1023,43 @@ public class ImageLoader {
         protected ArrayList<ImageReceiver> imageReceiverArray = new ArrayList<>();
         protected ArrayList<String> keys = new ArrayList<>();
         protected ArrayList<String> filters = new ArrayList<>();
+        protected ArrayList<Boolean> thumbs = new ArrayList<>();
 
-        public void addImageReceiver(ImageReceiver imageReceiver, String key, String filter) {
+        public void addImageReceiver(ImageReceiver imageReceiver, String key, String filter, boolean thumb) {
             if (imageReceiverArray.contains(imageReceiver)) {
                 return;
             }
             imageReceiverArray.add(imageReceiver);
             keys.add(key);
             filters.add(filter);
+            thumbs.add(thumb);
             imageLoadingByTag.put(imageReceiver.getTag(thumb), this);
         }
 
+        public void replaceImageReceiver(ImageReceiver imageReceiver, String key, String filter, boolean thumb) {
+            int index = imageReceiverArray.indexOf(imageReceiver);
+            if (index == -1) {
+                return;
+            }
+            if (thumbs.get(index) != thumb) {
+                index = imageReceiverArray.subList(index + 1, imageReceiverArray.size()).indexOf(imageReceiver);
+                if (index == -1) {
+                    return;
+                }
+            }
+            keys.set(index, key);
+            filters.set(index, filter);
+        }
+
         public void removeImageReceiver(ImageReceiver imageReceiver) {
+            Boolean thumb = selfThumb;
             for (int a = 0; a < imageReceiverArray.size(); a++) {
                 ImageReceiver obj = imageReceiverArray.get(a);
                 if (obj == null || obj == imageReceiver) {
                     imageReceiverArray.remove(a);
                     keys.remove(a);
                     filters.remove(a);
+                    thumb = thumbs.remove(a);
                     if (obj != null) {
                         imageLoadingByTag.remove(obj.getTag(thumb));
                     }
@@ -1049,14 +1072,18 @@ public class ImageLoader {
                 }
                 imageReceiverArray.clear();
                 if (location != null) {
-                    if (location instanceof TLRPC.FileLocation) {
-                        FileLoader.getInstance().cancelLoadFile((TLRPC.FileLocation) location, ext);
-                    } else if (location instanceof TLRPC.Document) {
-                        FileLoader.getInstance().cancelLoadFile((TLRPC.Document) location);
+                    if (!forceLoadingImages.containsKey(key)) {
+                        if (location instanceof TLRPC.FileLocation) {
+                            FileLoader.getInstance().cancelLoadFile((TLRPC.FileLocation) location, ext);
+                        } else if (location instanceof TLRPC.Document) {
+                            FileLoader.getInstance().cancelLoadFile((TLRPC.Document) location);
+                        } else if (location instanceof TLRPC.TL_webDocument) {
+                            FileLoader.getInstance().cancelLoadFile((TLRPC.TL_webDocument) location);
+                        }
                     }
                 }
                 if (cacheTask != null) {
-                    if (thumb) {
+                    if (selfThumb) {
                         cacheThumbOutQueue.cancelRunnable(cacheTask);
                     } else {
                         cacheOutQueue.cancelRunnable(cacheTask);
@@ -1089,7 +1116,7 @@ public class ImageLoader {
                             AnimatedFileDrawable fileDrawable = (AnimatedFileDrawable) image;
                             for (int a = 0; a < finalImageReceiverArray.size(); a++) {
                                 ImageReceiver imgView = finalImageReceiverArray.get(a);
-                                if (imgView.setImageBitmapByKey(a == 0 ? fileDrawable : fileDrawable.makeCopy(), key, thumb, false)) {
+                                if (imgView.setImageBitmapByKey(a == 0 ? fileDrawable : fileDrawable.makeCopy(), key, selfThumb, false)) {
                                     imageSet = true;
                                 }
                             }
@@ -1099,7 +1126,7 @@ public class ImageLoader {
                         } else {
                             for (int a = 0; a < finalImageReceiverArray.size(); a++) {
                                 ImageReceiver imgView = finalImageReceiverArray.get(a);
-                                imgView.setImageBitmapByKey(image, key, thumb, false);
+                                imgView.setImageBitmapByKey(image, key, selfThumb, false);
                             }
                         }
                     }
@@ -1107,7 +1134,7 @@ public class ImageLoader {
             }
             for (int a = 0; a < imageReceiverArray.size(); a++) {
                 ImageReceiver imageReceiver = imageReceiverArray.get(a);
-                imageLoadingByTag.remove(imageReceiver.getTag(thumb));
+                imageLoadingByTag.remove(imageReceiver.getTag(selfThumb));
             }
             imageReceiverArray.clear();
             if (url != null) {
@@ -1261,7 +1288,7 @@ public class ImageLoader {
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context arg0, Intent intent) {
-                FileLog.e("tmessages", "file system changed");
+                FileLog.e("file system changed");
                 Runnable r = new Runnable() {
                     public void run() {
                         checkMediaPaths();
@@ -1294,13 +1321,13 @@ public class ImageLoader {
             try {
                 cachePath.mkdirs();
             } catch (Exception e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
         }
         try {
             new File(cachePath, ".nomedia").createNewFile();
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
         mediaDirs.put(FileLoader.MEDIA_DIR_CACHE, cachePath);
         FileLoader.getInstance().setMediaDirs(mediaDirs);
@@ -1330,17 +1357,17 @@ public class ImageLoader {
             try {
                 cachePath.mkdirs();
             } catch (Exception e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
         }
         try {
             new File(cachePath, ".nomedia").createNewFile();
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
 
         mediaDirs.put(FileLoader.MEDIA_DIR_CACHE, cachePath);
-        FileLog.e("tmessages", "cache path = " + cachePath);
+        FileLog.e("cache path = " + cachePath);
 
         try {
             if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
@@ -1353,10 +1380,10 @@ public class ImageLoader {
                         imagePath.mkdir();
                         if (imagePath.isDirectory() && canMoveFiles(cachePath, imagePath, FileLoader.MEDIA_DIR_IMAGE)) {
                             mediaDirs.put(FileLoader.MEDIA_DIR_IMAGE, imagePath);
-                            FileLog.e("tmessages", "image path = " + imagePath);
+                            FileLog.e("image path = " + imagePath);
                         }
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
 
                     try {
@@ -1364,10 +1391,10 @@ public class ImageLoader {
                         videoPath.mkdir();
                         if (videoPath.isDirectory() && canMoveFiles(cachePath, videoPath, FileLoader.MEDIA_DIR_VIDEO)) {
                             mediaDirs.put(FileLoader.MEDIA_DIR_VIDEO, videoPath);
-                            FileLog.e("tmessages", "video path = " + videoPath);
+                            FileLog.e("video path = " + videoPath);
                         }
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
 
                     try {
@@ -1376,10 +1403,10 @@ public class ImageLoader {
                         if (audioPath.isDirectory() && canMoveFiles(cachePath, audioPath, FileLoader.MEDIA_DIR_AUDIO)) {
                             new File(audioPath, ".nomedia").createNewFile();
                             mediaDirs.put(FileLoader.MEDIA_DIR_AUDIO, audioPath);
-                            FileLog.e("tmessages", "audio path = " + audioPath);
+                            FileLog.e("audio path = " + audioPath);
                         }
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
 
                     try {
@@ -1388,18 +1415,18 @@ public class ImageLoader {
                         if (documentPath.isDirectory() && canMoveFiles(cachePath, documentPath, FileLoader.MEDIA_DIR_DOCUMENT)) {
                             new File(documentPath, ".nomedia").createNewFile();
                             mediaDirs.put(FileLoader.MEDIA_DIR_DOCUMENT, documentPath);
-                            FileLog.e("tmessages", "documents path = " + documentPath);
+                            FileLog.e("documents path = " + documentPath);
                         }
                     } catch (Exception e) {
-                        FileLog.e("tmessages", e);
+                        FileLog.e(e);
                     }
                 }
             } else {
-                FileLog.e("tmessages", "this Android can't rename files");
+                FileLog.e("this Android can't rename files");
             }
             MediaController.getInstance().checkSaveToGalleryFiles();
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
 
         return mediaDirs;
@@ -1436,14 +1463,14 @@ public class ImageLoader {
                 return true;
             }
         } catch (Exception e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         } finally {
             try {
                 if (file != null) {
                     file.close();
                 }
             } catch (Exception e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             }
         }
         return false;
@@ -1459,10 +1486,23 @@ public class ImageLoader {
     private void performReplace(String oldKey, String newKey) {
         BitmapDrawable b = memCache.get(oldKey);
         if (b != null) {
-            ignoreRemoval = oldKey;
-            memCache.remove(oldKey);
-            memCache.put(newKey, b);
-            ignoreRemoval = null;
+            BitmapDrawable oldBitmap = memCache.get(newKey);
+            boolean dontChange = false;
+            if (oldBitmap != null && oldBitmap.getBitmap() != null && b.getBitmap() != null) {
+                Bitmap oldBitmapObject = oldBitmap.getBitmap();
+                Bitmap newBitmapObject = b.getBitmap();
+                if (oldBitmapObject.getWidth() > newBitmapObject.getWidth() || oldBitmapObject.getHeight() > newBitmapObject.getHeight()) {
+                    dontChange = true;
+                }
+            }
+            if (!dontChange) {
+                ignoreRemoval = oldKey;
+                memCache.remove(oldKey);
+                memCache.put(newKey, b);
+                ignoreRemoval = null;
+            } else {
+                memCache.remove(oldKey);
+            }
         }
         Integer val = bitmapUseCounts.get(oldKey);
         if (val != null) {
@@ -1573,6 +1613,9 @@ public class ImageLoader {
                 } else {
                     key = location.dc_id + "_" + location.id + "_" + location.version;
                 }
+            } else if (fileLocation instanceof TLRPC.TL_webDocument) {
+                TLRPC.TL_webDocument location = (TLRPC.TL_webDocument) fileLocation;
+                key = Utilities.MD5(location.url);
             }
         }
         if (filter != null) {
@@ -1626,7 +1669,23 @@ public class ImageLoader {
         }
     }
 
-    private void createLoadOperationForImageReceiver(final ImageReceiver imageReceiver, final String key, final String url, final String ext, final TLObject imageLocation, final String httpLocation, final String filter, final int size, final boolean cacheOnly, final int thumb) {
+    public void cancelForceLoadingForImageReceiver(final ImageReceiver imageReceiver) {
+        if (imageReceiver == null) {
+            return;
+        }
+        final String key = imageReceiver.getKey();
+        if (key == null) {
+            return;
+        }
+        imageLoadQueue.postRunnable(new Runnable() {
+            @Override
+            public void run() {
+                forceLoadingImages.remove(key);
+            }
+        });
+    }
+
+    private void createLoadOperationForImageReceiver(final ImageReceiver imageReceiver, final String key, final String url, final String ext, final TLObject imageLocation, final String httpLocation, final String filter, final int size, final int cacheType, final int thumb) {
         if (imageReceiver == null || url == null || key == null) {
             return;
         }
@@ -1652,7 +1711,12 @@ public class ImageLoader {
                     CacheImage alreadyLoadingCache = imageLoadingByKeys.get(key);
                     CacheImage alreadyLoadingImage = imageLoadingByTag.get(finalTag);
                     if (alreadyLoadingImage != null) {
-                        if (alreadyLoadingImage == alreadyLoadingUrl || alreadyLoadingImage == alreadyLoadingCache) {
+                        if (alreadyLoadingImage == alreadyLoadingCache) {
+                            added = true;
+                        } else if (alreadyLoadingImage == alreadyLoadingUrl) {
+                            if (alreadyLoadingCache == null) {
+                                alreadyLoadingImage.replaceImageReceiver(imageReceiver, key, filter, thumb != 0);
+                            }
                             added = true;
                         } else {
                             alreadyLoadingImage.removeImageReceiver(imageReceiver);
@@ -1660,11 +1724,11 @@ public class ImageLoader {
                     }
 
                     if (!added && alreadyLoadingCache != null) {
-                        alreadyLoadingCache.addImageReceiver(imageReceiver, key, filter);
+                        alreadyLoadingCache.addImageReceiver(imageReceiver, key, filter, thumb != 0);
                         added = true;
                     }
                     if (!added && alreadyLoadingUrl != null) {
-                        alreadyLoadingUrl.addImageReceiver(imageReceiver, key, filter);
+                        alreadyLoadingUrl.addImageReceiver(imageReceiver, key, filter, thumb != 0);
                         added = true;
                     }
                 }
@@ -1673,6 +1737,7 @@ public class ImageLoader {
                     boolean onlyCache = false;
                     boolean isQuality = false;
                     File cacheFile = null;
+                    boolean cacheFileExists = false;
 
                     if (httpLocation != null) {
                         if (!httpLocation.startsWith("http")) {
@@ -1696,6 +1761,8 @@ public class ImageLoader {
                             cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_CACHE), "q_" + url);
                             if (!cacheFile.exists()) {
                                 cacheFile = null;
+                            } else {
+                                cacheFileExists = true;
                             }
                         }
 
@@ -1729,28 +1796,49 @@ public class ImageLoader {
                     }
 
                     if (thumb != 2) {
+                        boolean isEncrypted = imageLocation instanceof TLRPC.TL_documentEncrypted || imageLocation instanceof TLRPC.TL_fileEncryptedLocation;
                         CacheImage img = new CacheImage();
-                        if (httpLocation != null && !httpLocation.startsWith("vthumb") && !httpLocation.startsWith("thumb") && (httpLocation.endsWith("mp4") || httpLocation.endsWith("gif")) || imageLocation instanceof TLRPC.Document && MessageObject.isGifDocument((TLRPC.Document) imageLocation)) {
+                        if (httpLocation != null && !httpLocation.startsWith("vthumb") && !httpLocation.startsWith("thumb")) {
+                            String trueExt = getHttpUrlExtension(httpLocation, "jpg");
+                            if (trueExt.equals("mp4") || trueExt.equals("gif")) {
+                                img.animatedFile = true;
+                            }
+                        } else if (imageLocation instanceof TLRPC.TL_webDocument && ((TLRPC.TL_webDocument) imageLocation).mime_type.equals("image/gif") ||
+                                imageLocation instanceof TLRPC.Document && (MessageObject.isGifDocument((TLRPC.Document) imageLocation) || MessageObject.isRoundVideoDocument((TLRPC.Document) imageLocation))) {
                             img.animatedFile = true;
                         }
 
                         if (cacheFile == null) {
-                            if (cacheOnly || size == 0 || httpLocation != null) {
+                            if (cacheType != 0 || size <= 0 || httpLocation != null || isEncrypted) {
                                 cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_CACHE), url);
+                                if (cacheFile.exists()) {
+                                    cacheFileExists = true;
+                                } else if (cacheType == 2) {
+                                    cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_CACHE), url + ".enc");
+                                }
                             } else if (imageLocation instanceof TLRPC.Document) {
+                                if (MessageObject.isVideoDocument((TLRPC.Document) imageLocation)) {
+                                    cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_VIDEO), url);
+                                } else {
+                                    cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_DOCUMENT), url);
+                                }
+                            } else if (imageLocation instanceof TLRPC.TL_webDocument) {
                                 cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_DOCUMENT), url);
                             } else {
                                 cacheFile = new File(FileLoader.getInstance().getDirectory(FileLoader.MEDIA_DIR_IMAGE), url);
                             }
                         }
 
-                        img.thumb = thumb != 0;
+                        img.selfThumb = thumb != 0;
                         img.key = key;
                         img.filter = filter;
                         img.httpUrl = httpLocation;
                         img.ext = ext;
-                        img.addImageReceiver(imageReceiver, key, filter);
-                        if (onlyCache || cacheFile.exists()) {
+                        if (cacheType == 2) {
+                            img.encryptionKeyPath = new File(FileLoader.getInternalCacheDir(), url + ".enc.key");
+                        }
+                        img.addImageReceiver(imageReceiver, key, filter, thumb != 0);
+                        if (onlyCache || cacheFileExists || cacheFile.exists()) {
                             img.finalFilePath = cacheFile;
                             img.cacheTask = new CacheOutTask(img);
                             imageLoadingByKeys.put(key, img);
@@ -1766,9 +1854,18 @@ public class ImageLoader {
                             if (httpLocation == null) {
                                 if (imageLocation instanceof TLRPC.FileLocation) {
                                     TLRPC.FileLocation location = (TLRPC.FileLocation) imageLocation;
-                                    FileLoader.getInstance().loadFile(location, ext, size, size == 0 || location.key != null || cacheOnly);
+                                    int localCacheType = cacheType;
+                                    if (localCacheType == 0 && (size <= 0 || location.key != null)) {
+                                        localCacheType = 1;
+                                    }
+                                    FileLoader.getInstance().loadFile(location, ext, size, localCacheType);
                                 } else if (imageLocation instanceof TLRPC.Document) {
-                                    FileLoader.getInstance().loadFile((TLRPC.Document) imageLocation, true, cacheOnly);
+                                    FileLoader.getInstance().loadFile((TLRPC.Document) imageLocation, true, cacheType);
+                                } else if (imageLocation instanceof TLRPC.TL_webDocument) {
+                                    FileLoader.getInstance().loadFile((TLRPC.TL_webDocument) imageLocation, true, cacheType);
+                                }
+                                if (imageReceiver.isForceLoding()) {
+                                    forceLoadingImages.put(img.key, 0);
                                 }
                             } else {
                                 String file = Utilities.MD5(httpLocation);
@@ -1791,13 +1888,15 @@ public class ImageLoader {
             return;
         }
 
+        boolean imageSet = false;
         String key = imageReceiver.getKey();
         if (key != null) {
             BitmapDrawable bitmapDrawable = memCache.get(key);
             if (bitmapDrawable != null) {
                 cancelLoadingForImageReceiver(imageReceiver, 0);
+                imageReceiver.setImageBitmapByKey(bitmapDrawable, key, false, true);
+                imageSet = true;
                 if (!imageReceiver.isForcePreview()) {
-                    imageReceiver.setImageBitmapByKey(bitmapDrawable, key, false, true);
                     return;
                 }
             }
@@ -1809,6 +1908,9 @@ public class ImageLoader {
             if (bitmapDrawable != null) {
                 imageReceiver.setImageBitmapByKey(bitmapDrawable, thumbKey, true, true);
                 cancelLoadingForImageReceiver(imageReceiver, 1);
+                if (imageSet && imageReceiver.isForcePreview()) {
+                    return;
+                }
                 thumbSet = true;
             }
         }
@@ -1838,6 +1940,11 @@ public class ImageLoader {
                 if (imageReceiver.getExt() != null || location.key != null || location.volume_id == Integer.MIN_VALUE && location.local_id < 0) {
                     saveImageToCache = true;
                 }
+            } else if (imageLocation instanceof TLRPC.TL_webDocument) {
+                TLRPC.TL_webDocument document = (TLRPC.TL_webDocument) imageLocation;
+                String defaultExt = FileLoader.getExtensionByMime(document.mime_type);
+                key = Utilities.MD5(document.url);
+                url = key + "." + getHttpUrlExtension(document.url, defaultExt);
             } else if (imageLocation instanceof TLRPC.Document) {
                 TLRPC.Document document = (TLRPC.Document) imageLocation;
                 if (document.id == 0 || document.dc_id == 0) {
@@ -1867,7 +1974,7 @@ public class ImageLoader {
                 if (thumbKey != null) {
                     thumbUrl = thumbKey + "." + ext;
                 }
-                saveImageToCache = !MessageObject.isGifDocument(document);
+                saveImageToCache = !MessageObject.isGifDocument(document) && !MessageObject.isRoundVideoDocument((TLRPC.Document) imageLocation);
             }
             if (imageLocation == thumbLocation) {
                 imageLocation = null;
@@ -1891,11 +1998,15 @@ public class ImageLoader {
         }
 
         if (httpLocation != null) {
-            createLoadOperationForImageReceiver(imageReceiver, thumbKey, thumbUrl, ext, thumbLocation, null, thumbFilter, 0, true, thumbSet ? 2 : 1);
-            createLoadOperationForImageReceiver(imageReceiver, key, url, ext, null, httpLocation, filter, 0, true, 0);
+            createLoadOperationForImageReceiver(imageReceiver, thumbKey, thumbUrl, ext, thumbLocation, null, thumbFilter, 0, 1, thumbSet ? 2 : 1);
+            createLoadOperationForImageReceiver(imageReceiver, key, url, ext, null, httpLocation, filter, 0, 1, 0);
         } else {
-            createLoadOperationForImageReceiver(imageReceiver, thumbKey, thumbUrl, ext, thumbLocation, null, thumbFilter, 0, true, thumbSet ? 2 : 1);
-            createLoadOperationForImageReceiver(imageReceiver, key, url, ext, imageLocation, null, filter, imageReceiver.getSize(), saveImageToCache || imageReceiver.getCacheOnly(), 0);
+            int cacheType = imageReceiver.getCacheType();
+            if (cacheType == 0 && saveImageToCache) {
+                cacheType = 1;
+            }
+            createLoadOperationForImageReceiver(imageReceiver, thumbKey, thumbUrl, ext, thumbLocation, null, thumbFilter, 0, cacheType == 0 ? 1 : cacheType, thumbSet ? 2 : 1);
+            createLoadOperationForImageReceiver(imageReceiver, key, url, ext, imageLocation, null, filter, imageReceiver.getSize(), cacheType, 0);
         }
     }
 
@@ -1933,6 +2044,7 @@ public class ImageLoader {
                 for (int a = 0; a < img.imageReceiverArray.size(); a++) {
                     String key = img.keys.get(a);
                     String filter = img.filters.get(a);
+                    Boolean thumb = img.thumbs.get(a);
                     ImageReceiver imageReceiver = img.imageReceiverArray.get(a);
                     CacheImage cacheImage = imageLoadingByKeys.get(key);
                     if (cacheImage == null) {
@@ -1940,21 +2052,23 @@ public class ImageLoader {
                         cacheImage.finalFilePath = finalFile;
                         cacheImage.key = key;
                         cacheImage.httpUrl = img.httpUrl;
-                        cacheImage.thumb = img.thumb;
+                        cacheImage.selfThumb = thumb;
                         cacheImage.ext = img.ext;
+                        cacheImage.encryptionKeyPath = img.encryptionKeyPath;
                         cacheImage.cacheTask = new CacheOutTask(cacheImage);
                         cacheImage.filter = filter;
                         cacheImage.animatedFile = img.animatedFile;
                         imageLoadingByKeys.put(key, cacheImage);
                         tasks.add(cacheImage.cacheTask);
                     }
-                    cacheImage.addImageReceiver(imageReceiver, key, filter);
+                    cacheImage.addImageReceiver(imageReceiver, key, filter, thumb);
                 }
                 for (int a = 0; a < tasks.size(); a++) {
-                    if (img.thumb) {
-                        cacheThumbOutQueue.postRunnable(tasks.get(a));
+                    CacheOutTask task = tasks.get(a);
+                    if (task.cacheImage.selfThumb) {
+                        cacheThumbOutQueue.postRunnable(task);
                     } else {
-                        cacheOutQueue.postRunnable(tasks.get(a));
+                        cacheOutQueue.postRunnable(task);
                     }
                 }
             }
@@ -2072,7 +2186,7 @@ public class ImageLoader {
                 try {
                     path = AndroidUtilities.getPath(uri);
                 } catch (Throwable e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
             }
         }
@@ -2087,7 +2201,7 @@ public class ImageLoader {
                 inputStream.close();
                 inputStream = ApplicationLoader.applicationContext.getContentResolver().openInputStream(uri);
             } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
                 return null;
             }
         }
@@ -2099,6 +2213,13 @@ public class ImageLoader {
         }
         bmOptions.inJustDecodeBounds = false;
         bmOptions.inSampleSize = (int) scaleFactor;
+        if (bmOptions.inSampleSize % 2 != 0) {
+            int sample = 1;
+            while (sample * 2 < bmOptions.inSampleSize) {
+                sample *= 2;
+            }
+            bmOptions.inSampleSize = sample;
+        }
         bmOptions.inPurgeable = Build.VERSION.SDK_INT < 21;
 
         String exifPath = null;
@@ -2127,8 +2248,8 @@ public class ImageLoader {
                         matrix.postRotate(270);
                         break;
                 }
-            } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+            } catch (Throwable ignore) {
+
             }
         }
 
@@ -2147,7 +2268,7 @@ public class ImageLoader {
                     }
                 }
             } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
                 ImageLoader.getInstance().clearMemory();
                 try {
                     if (b == null) {
@@ -2164,7 +2285,7 @@ public class ImageLoader {
                         }
                     }
                 } catch (Throwable e2) {
-                    FileLog.e("tmessages", e2);
+                    FileLog.e(e2);
                 }
             }
         } else if (uri != null) {
@@ -2181,12 +2302,12 @@ public class ImageLoader {
                     }
                 }
             } catch (Throwable e) {
-                FileLog.e("tmessages", e);
+                FileLog.e(e);
             } finally {
                 try {
                     inputStream.close();
                 } catch (Throwable e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
             }
         }
@@ -2207,7 +2328,7 @@ public class ImageLoader {
                 f.readFully(photoSize.bytes, 0, photoSize.bytes.length);
             }
         } catch (Throwable e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
         }
     }
 
@@ -2295,13 +2416,13 @@ public class ImageLoader {
         try {
             return scaleAndSaveImageInternal(bitmap, w, h, photoW, photoH, scaleFactor, quality, cache, scaleAnyway);
         } catch (Throwable e) {
-            FileLog.e("tmessages", e);
+            FileLog.e(e);
             ImageLoader.getInstance().clearMemory();
             System.gc();
             try {
                 return scaleAndSaveImageInternal(bitmap, w, h, photoW, photoH, scaleFactor, quality, cache, scaleAnyway);
             } catch (Throwable e2) {
-                FileLog.e("tmessages", e2);
+                FileLog.e(e2);
                 return null;
             }
         }
@@ -2309,6 +2430,10 @@ public class ImageLoader {
 
     public static String getHttpUrlExtension(String url, String defaultExt) {
         String ext = null;
+        String last = Uri.parse(url).getLastPathSegment();
+        if (!TextUtils.isEmpty(last) && last.length() > 1) {
+            url = last;
+        }
         int idx = url.lastIndexOf('.');
         if (idx != -1) {
             ext = url.substring(idx + 1);
@@ -2351,13 +2476,36 @@ public class ImageLoader {
                 UserConfig.lastLocalId--;
             }
             File file = FileLoader.getPathToAttach(photoSize, true);
+            boolean isEncrypted = false;
+            if (MessageObject.shouldEncryptPhotoOrVideo(message)) {
+                file = new File(file.getAbsolutePath() + ".enc");
+                isEncrypted = true;
+            }
             if (!file.exists()) {
                 try {
+                    if (isEncrypted) {
+                        File keyPath = new File(FileLoader.getInternalCacheDir(), file.getName() + ".key");
+                        RandomAccessFile keyFile = new RandomAccessFile(keyPath, "rws");
+                        long len = keyFile.length();
+                        byte[] encryptKey = new byte[32];
+                        byte[] encryptIv = new byte[16];
+                        if (len > 0 && len % 48 == 0) {
+                            keyFile.read(encryptKey, 0, 32);
+                            keyFile.read(encryptIv, 0, 16);
+                        } else {
+                            Utilities.random.nextBytes(encryptKey);
+                            Utilities.random.nextBytes(encryptIv);
+                            keyFile.write(encryptKey);
+                            keyFile.write(encryptIv);
+                        }
+                        keyFile.close();
+                        Utilities.aesCtrDecryptionByteArray(photoSize.bytes, encryptKey, encryptIv, 0, photoSize.bytes.length, 0);
+                    }
                     RandomAccessFile writeFile = new RandomAccessFile(file, "rws");
                     writeFile.write(photoSize.bytes);
                     writeFile.close();
                 } catch (Exception e) {
-                    FileLog.e("tmessages", e);
+                    FileLog.e(e);
                 }
             }
             TLRPC.TL_photoSize newPhotoSize = new TLRPC.TL_photoSize();
